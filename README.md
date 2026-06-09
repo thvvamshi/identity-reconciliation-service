@@ -1,36 +1,108 @@
+# Identity Reconciliation Service
 
-# Bitespeed Backend Task – Identity Reconciliation
+A backend service that intelligently reconciles customer identities across multiple interactions by linking contact information based on shared email addresses and phone numbers.
+
+The system maintains a unified customer profile while preserving historical records, ensuring that a single customer is represented consistently even when different contact details are used over time.
+
+---
 
 ## Overview
 
-This project implements the **Identity Reconciliation Service** as described in the official Bitespeed Backend Task.
+Customer data often becomes fragmented when users interact with a platform using different combinations of emails and phone numbers. This project addresses that challenge by automatically identifying related contacts and consolidating them into a single logical identity.
 
-The service consolidates customer identities across multiple purchases based on shared **email** and/or **phoneNumber**.
+The service exposes a REST API that accepts contact information and returns a unified customer view by applying identity resolution and contact-linking rules.
 
-It ensures:
+---
 
-* Contact linking based on email or phone number
-* Primary–secondary relationship maintenance
-* Automatic merging of connected identities
-* Deterministic primary selection (oldest contact remains primary)
-* Consolidated response format as per specification
+## Features
 
-## Problem Summary
+* Identity resolution using email and phone number matching
+* Automatic contact linking
+* Primary and secondary contact management
+* Duplicate contact prevention
+* Contact cluster merging
+* Deterministic oldest-primary selection
+* Email-only and phone-only support
+* Transaction-safe database operations
+* RESTful API architecture
 
-Bitespeed stores customer contact information in a relational table named `Contact`.
+---
 
-A single customer may have multiple rows in the database.
+## How It Works
 
-### Rules
+### New Contact
 
-* Contacts are linked if they share the same **email OR phoneNumber**
-* The **oldest contact** in a group is marked as `"primary"`
-* All others are marked as `"secondary"`
-* If two primary contacts become connected, the older remains primary
-* New incoming information creates a secondary contact
-* Exact matches must NOT create duplicate rows
+If no existing contact matches the incoming information:
 
-The service exposes a `POST /identify` endpoint that returns consolidated identity information.
+* A new primary contact is created.
+* The contact becomes the root identity for future associations.
+
+### Existing Contact
+
+If the email or phone number already exists:
+
+* Related contacts are discovered.
+* The oldest primary contact is identified.
+* New information is linked to the existing identity.
+
+### Contact Merge
+
+When two independent contact groups become connected:
+
+* The oldest primary contact remains primary.
+* The newer primary is converted into a secondary contact.
+* All linked contacts are updated accordingly.
+
+This ensures a single source of truth for each customer.
+
+---
+
+## Architecture
+
+The application follows a clean MVC architecture with a repository layer.
+
+```text
+Client
+   │
+   ▼
+Routes
+   │
+   ▼
+Controller Layer
+   │
+   ▼
+Business Logic
+   │
+   ▼
+Repository Layer
+   │
+   ▼
+MySQL Database
+```
+
+### Layers
+
+#### Routes
+
+Responsible for API endpoint registration.
+
+#### Controllers
+
+Handle request validation and response formatting.
+
+#### Business Logic
+
+Implements identity reconciliation rules and merge operations.
+
+#### Repository
+
+Manages all database interactions and transaction handling.
+
+#### Database
+
+Stores contacts and relationship metadata.
+
+---
 
 ## Database Schema
 
@@ -47,94 +119,140 @@ CREATE TABLE Contact (
 );
 ```
 
-The table is automatically initialized on server startup.
+### Contact Relationship Model
 
-## API Specification
+#### Primary Contact
 
-### Endpoint: POST /identify
+Represents the canonical customer identity.
 
-**Request Body (JSON)**
+#### Secondary Contact
+
+References an existing primary contact through `linkedId`.
+
+This structure allows historical records to be preserved while presenting a unified customer profile.
+
+---
+
+## API Reference
+
+### Identify Contact
+
+```http
+POST /identify
+```
+
+### Request Body
 
 ```json
 {
-   "email": "string (optional)",
-   "phoneNumber": "string (optional)"
+  "email": "user@example.com",
+  "phoneNumber": "9876543210"
 }
 ```
 
-> At least one of `email` or `phoneNumber` must be provided.
+Both fields are optional, but at least one must be provided.
 
-**Response Format**
+---
+
+### Response
 
 ```json
 {
-   "contact": {
-      "primaryContatctId": number,
-      "emails": string[],
-      "phoneNumbers": string[],
-      "secondaryContactIds": number[]
-   }
+  "contact": {
+    "primaryContatctId": 1,
+    "emails": [
+      "user@example.com"
+    ],
+    "phoneNumbers": [
+      "9876543210"
+    ],
+    "secondaryContactIds": []
+  }
 }
 ```
 
-**Response Rules**
+---
 
-* First element of `emails[]` is the primary contact email
-* First element of `phoneNumbers[]` is the primary contact phone
-* `secondaryContactIds[]` contains all secondary contact IDs linked to primary
+## Example Workflow
 
-## Example
-
-**Request**
+### Request 1
 
 ```json
 {
-   "email": "mcfly@hillvalley.edu",
-   "phoneNumber": "123456"
+  "email": "alpha@gmail.com",
+  "phoneNumber": "111"
 }
 ```
 
-**Response**
+Creates a new primary contact.
+
+### Request 2
 
 ```json
 {
-   "contact": {
-      "primaryContatctId": 1,
-      "emails": [
-         "lorraine@hillvalley.edu",
-         "mcfly@hillvalley.edu"
-      ],
-      "phoneNumbers": [
-         "123456"
-      ],
-      "secondaryContactIds": [23]
-   }
+  "email": "alpha@gmail.com",
+  "phoneNumber": "222"
 }
 ```
 
-## Supported Features
+Creates a secondary contact linked to the existing primary.
 
-* New primary creation
-* Secondary creation on partial match
-* Exact match detection (no duplicate insertion)
-* Primary-to-secondary conversion
-* Merging of two primary clusters
-* Deterministic oldest-primary resolution
-* Email-only and phone-only requests
-* Null-safe handling
-* Transaction-safe database operations
+### Request 3
+
+```json
+{
+  "email": "beta@gmail.com",
+  "phoneNumber": "222"
+}
+```
+
+Links the new email to the same customer identity.
+
+### Consolidated Response
+
+```json
+{
+  "contact": {
+    "primaryContatctId": 1,
+    "emails": [
+      "alpha@gmail.com",
+      "beta@gmail.com"
+    ],
+    "phoneNumbers": [
+      "111",
+      "222"
+    ],
+    "secondaryContactIds": [2, 3]
+  }
+}
+```
+
+---
 
 ## Tech Stack
 
+### Backend
+
 * Node.js
 * Express.js
+
+### Database
+
 * MySQL
+
+### Design Principles
+
 * MVC Architecture
-* Database Transactions
+* Repository Pattern
+* Transaction Management
+* RESTful API Design
+* Environment-Based Configuration
+
+---
 
 ## Project Structure
 
-```
+```text
 ├── controllers/
 │   └── identityController.js
 ├── models/
@@ -148,69 +266,96 @@ The table is automatically initialized on server startup.
 └── README.md
 ```
 
-## Getting Started
+---
 
-### 1. Install Dependencies
+## Installation
+
+### Clone Repository
+
+```bash
+git clone <repository-url>
+cd identity-reconciliation-service
+```
+
+### Install Dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Configure Environment
+### Configure Environment Variables
 
 Create a `.env` file:
 
-```
+```env
 DB_HOST=your_host
 DB_USER=your_user
 DB_PASS=your_password
-DB_NAME=railway
+DB_NAME=your_database
 DB_PORT=your_port
 PORT=3000
 ```
 
-### 3. Start Server
+### Start Server
 
 ```bash
 npm start
 ```
 
-The server runs at `http://localhost:3000`.
+The application will be available at:
+
+```text
+http://localhost:3000
+```
+
+---
 
 ## Deployment
 
-**Base URL**
+### Base URL
 
-```
+```text
 https://bitespeed-identity-reconciliation-sy46.onrender.com
 ```
 
-**API Endpoint**
+### Endpoint
 
-```
-POST https://bitespeed-identity-reconciliation-sy46.onrender.com/identify
-```
-
-**Note:** Only the `/identify` endpoint accepts POST requests.
-
-## Testing
-
-Use the following configuration:
-
-* Content-Type: `application/json`
-* Method: `POST`
-* Endpoint: `/identify`
-
-**Example Request**
-
-```bash
-POST https://bitespeed-identity-reconciliation-sy46.onrender.com/identify
-Content-Type: application/json
-
-{
-   "email": "alpha@gmail.com",
-   "phoneNumber": "111"
-}
-
+```text
+POST /identify
 ```
 
+---
+
+## Future Enhancements
+
+* Contact graph visualization
+* Identity merge audit logs
+* Contact analytics dashboard
+* Event-driven reconciliation pipeline
+* Redis caching layer
+* Monitoring and observability integration
+* High-volume performance optimizations
+
+---
+
+## Key Learnings
+
+This project demonstrates practical experience with:
+
+* Relational database modeling
+* Identity resolution systems
+* Data consistency strategies
+* Backend API development
+* Transaction management
+* Customer data reconciliation
+* Scalable service design
+
+---
+
+## Author
+
+**Vamshi Kumar**
+
+Backend Developer | Node.js | Express.js | MySQL | System Design
+
+LinkedIn: https://www.linkedin.com/in/bodavamshikumar
